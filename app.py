@@ -22,7 +22,7 @@ st.sidebar.header("データ設定")
 # CSV アップロード or サンプルデータ選択
 upload = st.sidebar.file_uploader("CSV をアップロード", type=["csv"])
 
-base_dir = os.path.dirname(__file__)
+base_dir = os.path.join(os.path.dirname(__file__), "dataset")
 sample_csvs = sorted([
     f for f in os.listdir(base_dir)
     if f.endswith(".csv") and os.path.isfile(os.path.join(base_dir, f))

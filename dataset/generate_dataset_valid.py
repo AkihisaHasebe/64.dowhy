@@ -32,6 +32,7 @@ Outcome の直接原因: Treatment, Severity, Age, DrugB (4変数)
   - DAG構造と係数は変更なし
 """
 
+import os
 import numpy as np
 import pandas as pd
 
@@ -126,7 +127,7 @@ ALL_FEATURES = [
 
 if __name__ == "__main__":
     df = generate_data()
-    output_path = "dataset_valid.csv"
+    output_path = os.path.join(os.path.dirname(__file__), "dataset_valid.csv")
     df.to_csv(output_path, index=False)
     print(f"検証用データセット生成完了: {output_path} ({len(df)} rows, {len(df.columns)} cols)")
     print(f"\n列一覧: {list(df.columns)}")

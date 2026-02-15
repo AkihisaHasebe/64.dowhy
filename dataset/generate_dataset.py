@@ -25,6 +25,7 @@ DAG構造 (21エッジ, 20変数):
   - DAG構造と係数は変更なし
 """
 
+import os
 import numpy as np
 import pandas as pd
 
@@ -167,7 +168,7 @@ ALL_FEATURES = [
 
 if __name__ == "__main__":
     df = generate_data()
-    output_path = "dataset.csv"
+    output_path = os.path.join(os.path.dirname(__file__), "dataset.csv")
     df.to_csv(output_path, index=False)
     print(f"データセット生成完了: {output_path} ({len(df)} rows, {len(df.columns)} cols)")
     print(f"\n列一覧: {list(df.columns)}")
