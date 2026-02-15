@@ -9,7 +9,7 @@ import networkx as nx
 import matplotlib
 import matplotlib.pyplot as plt
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 matplotlib.rcParams['font.family'] = 'Meiryo'
 
 st.header("分析実行")
@@ -57,8 +57,7 @@ def _color(f):
 st.sidebar.subheader("実行する手法")
 run_lingam = st.sidebar.checkbox("LiNGAM", value=True, key="sel_lingam")
 run_pc = st.sidebar.checkbox("PC", value=True, key="sel_pc")
-run_fci = st.sidebar.checkbox("FCI", value=True, key="sel_fci")
-run_fges = st.sidebar.checkbox("FGES", value=True, key="sel_fges")
+run_fci = st.sidebar.checkbox("FCI", value=True, key="sel_gfci")
 run_grasp = st.sidebar.checkbox("GRaSP", value=True, key="sel_grasp")
 
 # --- LiNGAM パラメータ ---
@@ -86,17 +85,6 @@ if run_pc:
     pc_threshold = st.sidebar.slider("エッジ採用確率閾値 (PC)", 0.1, 0.9, 0.50, 0.05,
                                       key="pc_th")
 
-# --- FGES パラメータ ---
-if run_fges:
-    st.sidebar.subheader("FGES パラメータ")
-    fges_score_func = st.sidebar.selectbox(
-        "スコア関数", ["local_score_BIC", "local_score_BDeu"],
-        key="fges_score")
-    fges_bootstrap = st.sidebar.slider("Bootstrap 回数 (FGES)", 10, 200, 100, 10,
-                                        key="fges_bs")
-    fges_threshold = st.sidebar.slider("エッジ採用確率閾値 (FGES)", 0.1, 0.9, 0.50, 0.05,
-                                        key="fges_th")
-
 # --- GRaSP パラメータ ---
 if run_grasp:
     st.sidebar.subheader("GRaSP パラメータ")
@@ -114,7 +102,7 @@ if run_grasp:
 # 実行ボタン
 # ============================================================
 
-if not any([run_lingam, run_pc, run_fci, run_fges, run_grasp]):
+if not any([run_lingam, run_pc, run_fci, run_grasp]):
     st.info("サイドバーから実行する手法を1つ以上選択してください。")
     st.stop()
 
@@ -157,16 +145,9 @@ def estimate_execution_time(df, methods_config):
             estimates["PC"] = base_time + bootstrap_time
 
         elif method == "FCI":
-            # O(n × p²), bootstrapなし
-            # 基準: 2000サンプル, 20変数で約3-5秒
-            estimates["FCI"] = 4.0 * (n_samples / 2000) * (n_features / 20) ** 2
-
-        elif method == "FGES":
-            # O(p³) 最適化版 + Bootstrap
-            # 基準: 20変数, 100 bootstrap で約8-12秒 (GES の 2-3倍高速)
-            base_time = 0.2 * (n_features / 20) ** 3
-            bootstrap_time = params.get("bootstrap", 100) * 0.10
-            estimates["FGES"] = base_time + bootstrap_time
+            # O(n × p²) with greedy optimization, bootstrapなし
+            # 基準: 2000サンプル, 20変数で約2-4秒 (条件付き独立性検定ベース)
+            estimates["FCI"] = 3.0 * (n_samples / 2000) * (n_features / 20) ** 2
 
         elif method == "GRaSP":
             # O(p³ × depth) + Bootstrap
@@ -183,7 +164,7 @@ def estimate_execution_time(df, methods_config):
 # 実行時間推定の表示
 # ============================================================
 
-if any([run_lingam, run_pc, run_fci, run_fges, run_grasp]):
+if any([run_lingam, run_pc, run_fci, run_grasp]):
     # 選択された手法とパラメータをまとめる
     methods_config = {}
     if run_lingam:
@@ -192,8 +173,6 @@ if any([run_lingam, run_pc, run_fci, run_fges, run_grasp]):
         methods_config["PC"] = {"bootstrap": pc_bootstrap}
     if run_fci:
         methods_config["FCI"] = {}
-    if run_fges:
-        methods_config["FGES"] = {"bootstrap": fges_bootstrap}
     if run_grasp:
         methods_config["GRaSP"] = {"bootstrap": grasp_bootstrap, "depth": grasp_depth}
 
@@ -237,22 +216,35 @@ if st.button("分析を実行", type="primary", use_container_width=True):
         methods.append("PC")
     if run_fci:
         methods.append("FCI")
-    if run_fges:
-        methods.append("FGES")
     if run_grasp:
         methods.append("GRaSP")
 
-    progress = st.progress(0, text="準備中...")
+    # 進捗表示用のコンテナ
+    progress_container = st.container()
+    with progress_container:
+        progress = st.progress(0, text="準備中...")
+        status_text = st.empty()
+
     total = len(methods)
     timing_results = {}
     overall_start = time.time()
 
     for i, method in enumerate(methods):
-        progress.progress(i / total, text=f"{method} 実行中...")
         method_start = time.time()
+        start_time_str = datetime.now().strftime("%H:%M:%S")
+
+        # 開始メッセージ
+        progress.progress(i / total, text=f"{method} 実行中...")
+        status_text.markdown(f"**{method}** を実行中... (開始: {start_time_str})")
 
         if method == "LiNGAM":
             from analysis.lingam_analysis import run_lingam as _run_lingam
+            status_text.markdown(
+                f"**LiNGAM** を実行中...\n"
+                f"- DirectLiNGAM アルゴリズムで因果順序を推定中\n"
+                f"- Bootstrap サンプリング: {lingam_bootstrap} 回\n"
+                f"- 開始: {start_time_str}"
+            )
             result = _run_lingam(df, target, lingam_bootstrap, lingam_min_effect,
                                  lingam_threshold)
             st.session_state["lingam_result"] = result
@@ -260,11 +252,22 @@ if st.button("分析を実行", type="primary", use_container_width=True):
             timing_results["LiNGAM"] = elapsed
             progress.progress((i + 0.5) / total,
                             text=f"{method} 完了 ({elapsed:.1f}秒)")
+            status_text.markdown(
+                f"✅ **LiNGAM** 完了 ({elapsed:.1f} 秒) — "
+                f"因果順序: {len(result['causal_order'])} 変数"
+            )
 
         elif method == "PC":
             from analysis.pc_fci_analysis import run_pc as _run_pc
             data = df.values
             column_names = list(df.columns)
+            status_text.markdown(
+                f"**PC** を実行中...\n"
+                f"- 条件付き独立性検定 ({pcfci_indep}) で CPDAG を構築中\n"
+                f"- Bootstrap サンプリング: {pc_bootstrap} 回\n"
+                f"- 有意水準: {pcfci_alpha}\n"
+                f"- 開始: {start_time_str}"
+            )
             result = _run_pc(data, column_names, target, pcfci_alpha, pcfci_indep,
                              pc_bootstrap, pc_threshold)
             st.session_state["pc_result"] = result
@@ -272,34 +275,44 @@ if st.button("分析を実行", type="primary", use_container_width=True):
             timing_results["PC"] = elapsed
             progress.progress((i + 0.5) / total,
                             text=f"{method} 完了 ({elapsed:.1f}秒)")
+            status_text.markdown(
+                f"✅ **PC** 完了 ({elapsed:.1f} 秒) — "
+                f"検出エッジ: {len(result['edges_df'])} 本"
+            )
 
         elif method == "FCI":
             from analysis.pc_fci_analysis import run_fci as _run_fci
             data = df.values
             column_names = list(df.columns)
+            status_text.markdown(
+                f"**FCI** を実行中...\n"
+                f"- 潜在交絡因子を考慮した PAG を構築中\n"
+                f"- 独立性検定: {pcfci_indep}\n"
+                f"- 有意水準: {pcfci_alpha}\n"
+                f"- 開始: {start_time_str}"
+            )
             result = _run_fci(data, column_names, target, pcfci_alpha, pcfci_indep)
             st.session_state["fci_result"] = result
             elapsed = time.time() - method_start
             timing_results["FCI"] = elapsed
             progress.progress((i + 0.5) / total,
                             text=f"{method} 完了 ({elapsed:.1f}秒)")
-
-        elif method == "FGES":
-            from analysis.fges_analysis import run_fges as _run_fges
-            data = df.values
-            column_names = list(df.columns)
-            result = _run_fges(data, column_names, target, fges_score_func,
-                               n_bootstrap=fges_bootstrap, threshold=fges_threshold)
-            st.session_state["fges_result"] = result
-            elapsed = time.time() - method_start
-            timing_results["FGES"] = elapsed
-            progress.progress((i + 0.5) / total,
-                            text=f"{method} 完了 ({elapsed:.1f}秒)")
+            status_text.markdown(
+                f"✅ **FCI** 完了 ({elapsed:.1f} 秒) — "
+                f"検出エッジ: {len(result['edges_df'])} 本"
+            )
 
         elif method == "GRaSP":
             from analysis.grasp_analysis import run_grasp as _run_grasp
             data = df.values
             column_names = list(df.columns)
+            status_text.markdown(
+                f"**GRaSP** を実行中...\n"
+                f"- 順列ベースの因果探索 (depth={grasp_depth})\n"
+                f"- Bootstrap サンプリング: {grasp_bootstrap} 回\n"
+                f"- スコア関数: {grasp_score_func}\n"
+                f"- 開始: {start_time_str}"
+            )
             result = _run_grasp(data, column_names, target, grasp_score_func,
                                 depth=grasp_depth, n_bootstrap=grasp_bootstrap,
                                 threshold=grasp_threshold)
@@ -308,11 +321,23 @@ if st.button("分析を実行", type="primary", use_container_width=True):
             timing_results["GRaSP"] = elapsed
             progress.progress((i + 0.5) / total,
                             text=f"{method} 完了 ({elapsed:.1f}秒)")
+            status_text.markdown(
+                f"✅ **GRaSP** 完了 ({elapsed:.1f} 秒) — "
+                f"検出エッジ: {len(result['edges_df'])} 本"
+            )
 
     overall_elapsed = time.time() - overall_start
 
     # --- 統合グラフ構築 + DoWhy 因果効果推定 ---
+    consensus_start = time.time()
+    consensus_start_str = datetime.now().strftime("%H:%M:%S")
     progress.progress(0.95, text="統合因果グラフ構築 + DoWhy 因果効果推定中...")
+    status_text.markdown(
+        f"**統合因果グラフ構築** を実行中...\n"
+        f"- 複数手法の結果を統合してコンセンサスグラフを構築\n"
+        f"- DoWhy による因果効果推定 (Backdoor criterion)\n"
+        f"- 開始: {consensus_start_str}"
+    )
     try:
         from analysis.consensus_graph import build_consensus_graph, get_adjacent_to_target
         from analysis.dowhy_estimation import estimate_causal_effects_with_dowhy
@@ -333,12 +358,26 @@ if st.button("分析を実行", type="primary", use_container_width=True):
         )
         st.session_state["dowhy_results"] = dowhy_results
 
+        consensus_elapsed = time.time() - consensus_start
+        status_text.markdown(
+            f"✅ **統合処理** 完了 ({consensus_elapsed:.1f} 秒) — "
+            f"統合エッジ: {len(edge_support_df)} 本"
+        )
+
     except Exception as e:
         st.session_state["consensus_graph"] = None
         st.session_state["dowhy_results"] = {}
         st.warning(f"統合グラフ or DoWhy 推定でエラー: {e}")
 
+    overall_elapsed = time.time() - overall_start
+    end_time_str = datetime.now().strftime("%H:%M:%S")
     progress.progress(1.0, text=f"完了 (合計: {overall_elapsed:.1f}秒)")
+    status_text.markdown(
+        f"🎉 **全ての分析が完了しました！**\n\n"
+        f"- 実行手法: {', '.join(methods)}\n"
+        f"- 総実行時間: {overall_elapsed:.1f} 秒\n"
+        f"- 終了: {end_time_str}"
+    )
 
     # 時間計測結果を保存
     st.session_state["timing_results"] = timing_results
@@ -360,8 +399,7 @@ if st.button("分析を実行", type="primary", use_container_width=True):
         st.caption(
             f"**計算量の目安** (サンプル数: {len(df)}, 変数数: {len(df.columns)})\n"
             f"- LiNGAM: O(n³) - ICA反復 + Bootstrap\n"
-            f"- PC/FCI: O(n × p²) - 条件付き独立性検定 + Bootstrap\n"
-            f"- FGES: O(p³) 最適化 - スコア計算 + 貪欲探索 + Bootstrap (GES の高速版)\n"
+            f"- PC/FCI: O(n × p²) - 条件付き独立性検定\n"
             f"- GRaSP: O(p³ × depth) - 順列探索 + Bootstrap\n"
             f"※ n=サンプル数, p=変数数"
         )
@@ -373,10 +411,9 @@ if st.button("分析を実行", type="primary", use_container_width=True):
 has_lingam = "lingam_result" in st.session_state
 has_pc = "pc_result" in st.session_state
 has_fci = "fci_result" in st.session_state
-has_fges = "fges_result" in st.session_state
 has_grasp = "grasp_result" in st.session_state
 
-if not any([has_lingam, has_pc, has_fci, has_fges, has_grasp]):
+if not any([has_lingam, has_pc, has_fci, has_grasp]):
     st.info("「分析を実行」ボタンを押してください。")
     st.stop()
 
@@ -458,7 +495,7 @@ for f in features:
     confidence_signals = []
 
     if has_lingam:
-        prob = res_l["edge_probs_to_target"]
+        prob = st.session_state["lingam_result"]["edge_probs_to_target"]
         row["LiNGAM確率"] = prob.get(f, 0)
         confidence_signals.append(prob.get(f, 0))
     else:
@@ -484,19 +521,6 @@ for f in features:
         confidence_signals.append(fci_adj)
     else:
         row["FCI隣接"] = np.nan
-
-    if has_fges:
-        fges_probs = st.session_state["fges_result"]["bootstrap_probs"]
-        fges_prob_f = max(
-            fges_probs.loc[target].get(f, 0) if f in fges_probs.columns else 0,
-            fges_probs[target].get(f, 0) if f in fges_probs.index else 0,
-        )
-        row["FGES確率"] = fges_prob_f
-        row["FGES隣接"] = 1 if f in st.session_state["fges_result"]["adjacent_to_target"] else 0
-        confidence_signals.append(fges_prob_f)
-    else:
-        row["FGES確率"] = np.nan
-        row["FGES隣接"] = np.nan
 
     if has_grasp:
         grasp_probs = st.session_state["grasp_result"]["bootstrap_probs"]
@@ -528,14 +552,12 @@ for f in features:
         causal_evidence += 1
     if has_fci and row.get("FCI隣接", 0) == 1:
         causal_evidence += 1
-    if has_fges and row.get("FGES隣接", 0) == 1:
-        causal_evidence += 1
     if has_grasp and row.get("GRaSP隣接", 0) == 1:
         causal_evidence += 1
     row["因果エビデンス数"] = causal_evidence
 
     # --- 判定ロジック ---
-    n_causal_methods = sum([has_lingam, has_pc, has_fci, has_fges, has_grasp])
+    n_causal_methods = sum([has_lingam, has_pc, has_fci, has_grasp])
     if n_causal_methods > 0 and causal_evidence >= 2:
         row["判定"] = "直接原因 (高確信)"
     elif n_causal_methods > 0 and causal_evidence == 1:
@@ -559,7 +581,7 @@ st.markdown(f"**{target} への統合介入スコア**")
 st.caption(
     "統合介入スコア = |効果量 (標準化)| × 因果確信度。"
     "効果量は **DoWhy による因果効果推定 (統合グラフ使用)** > LiNGAM の総因果効果 > OLS 回帰係数 の優先順位で選択。"
-    "因果確信度は LiNGAM / PC / FCI / FGES / GRaSP の平均確率 (0〜1)。"
+    "因果確信度は LiNGAM / PC / FCI / GRaSP の平均確率 (0〜1)。"
     "「介入した時にどれだけ目的変数が変わるか」と"
     "「その因果関係がどれだけ信頼できるか」の両方を反映。"
 )
@@ -668,10 +690,6 @@ with col_conf:
         conf_cols_data.append("FCI隣接")
         method_names.append("FCI")
         method_colors.append("#6A1B9A")
-    if has_fges:
-        conf_cols_data.append("FGES確率")
-        method_names.append("FGES")
-        method_colors.append("#00695C")
     if has_grasp:
         conf_cols_data.append("GRaSP確率")
         method_names.append("GRaSP")
@@ -718,8 +736,6 @@ if has_pc:
     display_cols.append("PC確率")
 if has_fci:
     display_cols.append("FCI隣接")
-if has_fges:
-    display_cols.append("FGES確率")
 if has_grasp:
     display_cols.append("GRaSP確率")
 if gt:
@@ -734,7 +750,6 @@ format_dict = {
     "間接効果(std)": "{:+.3f}",
     "LiNGAM確率": "{:.2f}",
     "PC確率": "{:.2f}",
-    "FGES確率": "{:.2f}",
     "GRaSP確率": "{:.2f}",
 }
 
@@ -853,6 +868,49 @@ if "consensus_graph" in st.session_state and st.session_state["consensus_graph"]
                 "**ATE (Average Treatment Effect)**: 変数を1単位増加させた時の目的変数への平均因果効果。"
                 "Backdoor criterion に基づき、統合グラフから交絡因子を調整して推定。"
             )
+
+
+# ============================================================
+# レポートダウンロード
+# ============================================================
+
+st.markdown("---")
+st.subheader("📥 分析レポートのダウンロード")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    # HTMLレポート生成
+    from analysis.report_generator import generate_html_report
+
+    html_report = generate_html_report(
+        st.session_state,
+        target,
+        features,
+        summary_df if 'summary_df' in locals() else None
+    )
+
+    st.download_button(
+        label="📄 HTMLレポートをダウンロード",
+        data=html_report,
+        file_name=f"causal_analysis_report_{target}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+        mime="text/html",
+        use_container_width=True,
+    )
+    st.caption("ブラウザで開けるHTML形式のレポート")
+
+with col2:
+    # CSVレポート生成（サマリーテーブル）
+    if 'summary_df' in locals() and summary_df is not None:
+        csv = summary_df.to_csv(index=True, encoding='utf-8-sig')
+        st.download_button(
+            label="📊 サマリーテーブル (CSV)",
+            data=csv,
+            file_name=f"intervention_summary_{target}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+        st.caption("Excel等で開けるCSV形式")
 
 
 # ============================================================
@@ -1030,23 +1088,23 @@ if has_pc:
 # ---- FCI ----
 if has_fci:
     with st.expander("FCI アルゴリズム", expanded=False):
-        fci_res = st.session_state["fci_result"]
+        gfci_res = st.session_state["fci_result"]
 
         st.markdown(f"**{target} の隣接ノード**")
-        st.write(sorted(fci_res["adjacent_to_target"]))
+        st.write(sorted(gfci_res["adjacent_to_target"]))
 
         st.markdown("**検出されたエッジ**")
         from analysis.pc_fci_analysis import EDGE_TYPE_LABELS
-        fci_display = fci_res["edges_df"].copy()
-        if len(fci_display) > 0:
-            fci_display["種別"] = fci_display["type"].map(
+        gfci_display = gfci_res["edges_df"].copy()
+        if len(gfci_display) > 0:
+            gfci_display["種別"] = gfci_display["type"].map(
                 lambda t: EDGE_TYPE_LABELS.get(t, t)
             )
-        st.dataframe(fci_display, use_container_width=True)
+        st.dataframe(gfci_display, use_container_width=True)
 
-        if len(fci_display) > 0:
+        if len(gfci_display) > 0:
             st.markdown("**エッジ種別の分布**")
-            type_counts = fci_display["種別"].value_counts()
+            type_counts = gfci_display["種別"].value_counts()
             fig_types = px.pie(values=type_counts.values,
                                names=type_counts.index,
                                title="FCI エッジ種別")
@@ -1054,24 +1112,24 @@ if has_fci:
             st.plotly_chart(fig_types, use_container_width=True)
 
         st.markdown("**推定 PAG**")
-        fci_edges = fci_res["edges_df"]
-        if len(fci_edges) > 0:
-            G_fci = nx.DiGraph()
-            G_fci.add_nodes_from(fci_res["columns"])
+        gfci_edges = gfci_res["edges_df"]
+        if len(gfci_edges) > 0:
+            G_gfci = nx.DiGraph()
+            G_gfci.add_nodes_from(gfci_res["columns"])
             edge_styles = {}
-            for _, row in fci_edges.iterrows():
-                G_fci.add_edge(row["From"], row["To"])
+            for _, row in gfci_edges.iterrows():
+                G_gfci.add_edge(row["From"], row["To"])
                 edge_styles[(row["From"], row["To"])] = row["type"]
 
-            fig_fci, ax = plt.subplots(figsize=(12, 8))
-            pos = nx.spring_layout(G_fci, seed=42, k=2)
+            fig_gfci, ax = plt.subplots(figsize=(12, 8))
+            pos = nx.spring_layout(G_gfci, seed=42, k=2)
             if gt:
-                nc = [_color(n) if n != target else "#4CAF50" for n in G_fci.nodes()]
+                nc = [_color(n) if n != target else "#4CAF50" for n in G_gfci.nodes()]
             else:
-                nc = ["#4CAF50" if n == target else "#2196F3" for n in G_fci.nodes()]
+                nc = ["#4CAF50" if n == target else "#2196F3" for n in G_gfci.nodes()]
 
             edge_colors = []
-            for u, v in G_fci.edges():
+            for u, v in G_gfci.edges():
                 etype = edge_styles.get((u, v), "directed")
                 if etype == "bidirected":
                     edge_colors.append("#E91E63")
@@ -1080,90 +1138,20 @@ if has_fci:
                 else:
                     edge_colors.append("#666")
 
-            nx.draw(G_fci, pos, ax=ax, with_labels=True, node_color=nc,
+            nx.draw(G_gfci, pos, ax=ax, with_labels=True, node_color=nc,
                     node_size=800, font_size=9, font_weight="bold",
                     edge_color=edge_colors, arrows=True, arrowsize=15,
                     connectionstyle="arc3,rad=0.1")
             ax.set_title("FCI 推定 PAG")
-            st.pyplot(fig_fci)
-            plt.close(fig_fci)
+            st.pyplot(fig_gfci)
+            plt.close(fig_gfci)
 
         if gt and gt.get("true_edges"):
             st.markdown("**真の DAG との比較**")
             true_direct = set(gt["direct_causes"])
-            tp = true_direct & fci_res["adjacent_to_target"]
-            fn = true_direct - fci_res["adjacent_to_target"]
-            fp = fci_res["adjacent_to_target"] - true_direct
-            st.markdown(f"**{target} の直接原因特定:**")
-            st.write(f"- 正解 (TP): {sorted(tp)}")
-            st.write(f"- 見逃し (FN): {sorted(fn)}")
-            st.write(f"- 誤検出 (FP): {sorted(fp)}")
-
-# ---- FGES ----
-if has_fges:
-    with st.expander("FGES (Fast Greedy Equivalence Search)", expanded=False):
-        fges_res = st.session_state["fges_result"]
-
-        st.markdown(f"**{target} の隣接ノード**")
-        st.write(sorted(fges_res["adjacent_to_target"]))
-
-        st.markdown("**検出されたエッジ**")
-        st.dataframe(fges_res["edges_df"], use_container_width=True)
-
-        st.markdown("**推定 CPDAG**")
-        fges_edges = fges_res["edges_df"]
-        if len(fges_edges) > 0:
-            G_fges = nx.DiGraph()
-            G_fges.add_nodes_from(fges_res["columns"])
-            for _, row in fges_edges.iterrows():
-                if row["type"] == "directed":
-                    G_fges.add_edge(row["From"], row["To"])
-                else:
-                    G_fges.add_edge(row["From"], row["To"])
-                    G_fges.add_edge(row["To"], row["From"])
-
-            fig_fges, ax = plt.subplots(figsize=(12, 8))
-            pos = nx.spring_layout(G_fges, seed=42, k=2)
-            if gt:
-                nc = [_color(n) if n != target else "#4CAF50" for n in G_fges.nodes()]
-            else:
-                nc = ["#4CAF50" if n == target else "#2196F3" for n in G_fges.nodes()]
-            nx.draw(G_fges, pos, ax=ax, with_labels=True, node_color=nc,
-                    node_size=800, font_size=9, font_weight="bold",
-                    edge_color="#666", arrows=True, arrowsize=15,
-                    connectionstyle="arc3,rad=0.1")
-            ax.set_title("FGES 推定 CPDAG")
-            st.pyplot(fig_fges)
-            plt.close(fig_fges)
-
-        st.markdown("**Bootstrap エッジ確率**")
-        fges_probs_df = fges_res["bootstrap_probs"]
-        fig_heat = px.imshow(
-            fges_probs_df, text_auto=".2f", color_continuous_scale="YlOrRd",
-            zmin=0, zmax=1, aspect="auto",
-        )
-        fig_heat.update_layout(height=600, margin=dict(t=30))
-        st.plotly_chart(fig_heat, use_container_width=True)
-
-        if gt and gt.get("true_edges"):
-            st.markdown("**真の DAG との比較**")
-            true_edges = gt["true_edges"]
-            true_skeleton = {frozenset(e) for e in true_edges}
-            fges_skeleton = {frozenset([r["From"], r["To"]])
-                             for _, r in fges_edges.iterrows()}
-            correct = true_skeleton & fges_skeleton
-            prec = len(correct) / len(fges_skeleton) if fges_skeleton else 0
-            rec = len(correct) / len(true_skeleton) if true_skeleton else 0
-            f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Precision", f"{prec:.3f}")
-            c2.metric("Recall", f"{rec:.3f}")
-            c3.metric("F1", f"{f1:.3f}")
-
-            true_direct = set(gt["direct_causes"])
-            tp = true_direct & fges_res["adjacent_to_target"]
-            fn = true_direct - fges_res["adjacent_to_target"]
-            fp = fges_res["adjacent_to_target"] - true_direct
+            tp = true_direct & gfci_res["adjacent_to_target"]
+            fn = true_direct - gfci_res["adjacent_to_target"]
+            fp = gfci_res["adjacent_to_target"] - true_direct
             st.markdown(f"**{target} の直接原因特定:**")
             st.write(f"- 正解 (TP): {sorted(tp)}")
             st.write(f"- 見逃し (FN): {sorted(fn)}")

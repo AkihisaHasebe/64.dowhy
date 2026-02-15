@@ -20,10 +20,9 @@ gt = st.session_state.get("ground_truth")
 has_lingam = "lingam_result" in st.session_state
 has_pc = "pc_result" in st.session_state
 has_fci = "fci_result" in st.session_state
-has_fges = "fges_result" in st.session_state
 has_grasp = "grasp_result" in st.session_state
 
-if not any([has_lingam, has_pc, has_fci, has_fges, has_grasp]):
+if not any([has_lingam, has_pc, has_fci, has_grasp]):
     st.warning("分析実行ページで少なくとも1つの分析を実行してください。")
     st.stop()
 
@@ -54,16 +53,6 @@ if has_fci:
     fci_adj = res["adjacent_to_target"]
     comparison["FCI隣接"] = [1 if f in fci_adj else 0 for f in features]
 
-if has_fges:
-    res = st.session_state["fges_result"]
-    fges_adj = res["adjacent_to_target"]
-    fges_probs = res["bootstrap_probs"]
-    target_col = fges_probs.columns[fges_probs.columns == target]
-    if len(target_col) > 0:
-        fges_probs_to_y = fges_probs[target].drop(target, errors="ignore")
-        comparison["FGES確率"] = fges_probs_to_y
-    comparison["FGES隣接"] = [1 if f in fges_adj else 0 for f in features]
-
 if has_grasp:
     res = st.session_state["grasp_result"]
     grasp_adj = res["adjacent_to_target"]
@@ -85,7 +74,7 @@ if gt:
 
 # ランキング列を追加
 for col in comparison.columns:
-    if col in ["カテゴリ", "PC隣接", "FCI隣接", "FGES隣接", "GRaSP隣接"]:
+    if col in ["カテゴリ", "PC隣接", "FCI隣接", "GRaSP隣接"]:
         continue
     comparison[f"{col}_順位"] = comparison[col].rank(ascending=False).astype(int)
 
@@ -115,9 +104,6 @@ if has_pc:
 
 if has_fci:
     method_selections["FCI"] = st.session_state["fci_result"]["adjacent_to_target"]
-
-if has_fges:
-    method_selections["FGES"] = st.session_state["fges_result"]["adjacent_to_target"]
 
 if has_grasp:
     method_selections["GRaSP"] = st.session_state["grasp_result"]["adjacent_to_target"]
@@ -198,8 +184,8 @@ if gt:
     ability_df = pd.DataFrame(ability_data)
     st.dataframe(ability_df, use_container_width=True)
 
-    # スケルトン比較 (LiNGAM, PC, FGES, GRaSP)
-    if (has_lingam or has_pc or has_fges or has_grasp) and gt.get("true_edges"):
+    # スケルトン比較 (LiNGAM, PC, GRaSP)
+    if (has_lingam or has_pc or has_grasp) and gt.get("true_edges"):
         st.subheader("スケルトン比較 (真の DAG vs 推定)")
         true_edges = gt["true_edges"]
         true_skeleton = {frozenset(e) for e in true_edges}
@@ -226,18 +212,6 @@ if gt:
             f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
             skeleton_comp.append({
                 "手法": "PC", "検出数": len(est_skel),
-                "Precision": f"{prec:.4f}", "Recall": f"{rec:.4f}", "F1": f"{f1:.4f}",
-            })
-
-        if has_fges:
-            edges_df = st.session_state["fges_result"]["edges_df"]
-            est_skel = {frozenset([r["From"], r["To"]]) for _, r in edges_df.iterrows()}
-            correct = true_skeleton & est_skel
-            prec = len(correct) / len(est_skel) if est_skel else 0
-            rec = len(correct) / len(true_skeleton) if true_skeleton else 0
-            f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
-            skeleton_comp.append({
-                "手法": "FGES", "検出数": len(est_skel),
                 "Precision": f"{prec:.4f}", "Recall": f"{rec:.4f}", "F1": f"{f1:.4f}",
             })
 
@@ -268,12 +242,12 @@ st.markdown("---")
 st.markdown("""
 ### 手法の特性まとめ
 
-| 観点 | LiNGAM | PC | FCI | FGES | GRaSP |
-|:---|:---|:---|:---|:---|:---|
-| **問い** | 因果の方向と強度 | 因果スケルトン | 因果 + 潜在変数 | 因果スケルトン (高速スコアベース) | 因果スケルトン (順列ベース) |
-| **擬似相関の扱い** | 区別可能 | 区別可能 | 区別可能 | 区別可能 | 区別可能 |
-| **方向の識別** | 可能 | 部分的 | 部分的 | 部分的 | 部分的 |
-| **アプローチ** | ICA ベース | 制約ベース | 制約ベース | スコアベース最適化 (BIC) | 順列ベース (BIC) |
-| **前提条件** | 線形 + 非ガウス | 忠実性 | 忠実性 | 忠実性 | Adjacency faithfulness |
-| **潜在変数** | 考慮なし | 考慮なし | 考慮あり | 考慮なし | 考慮なし |
+| 観点 | LiNGAM | PC | FCI | GRaSP |
+|:---|:---|:---|:---|:---|
+| **問い** | 因果の方向と強度 | 因果スケルトン | 因果 + 潜在変数 | 因果スケルトン (順列ベース) |
+| **擬似相関の扱い** | 区別可能 | 区別可能 | 区別可能 | 区別可能 |
+| **方向の識別** | 可能 | 部分的 | 部分的 | 部分的 |
+| **アプローチ** | ICA ベース | 制約ベース | 制約ベース (潜在変数対応) | 順列ベース (BIC) |
+| **前提条件** | 線形 + 非ガウス | 忠実性 | 忠実性 | Adjacency faithfulness |
+| **潜在変数** | 考慮なし | 考慮なし | 考慮あり | 考慮なし |
 """)

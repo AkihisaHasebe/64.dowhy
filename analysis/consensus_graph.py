@@ -96,30 +96,6 @@ def build_consensus_graph(
                     "coefficient": None,
                 }
 
-    # --- FGES ---
-    if "fges_result" in session_state:
-        res = session_state["fges_result"]
-        edges_df = res["edges_df"]
-        for _, row in edges_df.iterrows():
-            edge = (row["From"], row["To"])
-            if edge not in edge_votes:
-                edge_votes[edge] = {}
-            is_directed = (row["type"] == "directed")
-            edge_votes[edge]["FGES"] = {
-                "directed": is_directed,
-                "probability": row.get("probability", 1.0),
-                "coefficient": None,
-            }
-            if not is_directed:
-                edge_rev = (row["To"], row["From"])
-                if edge_rev not in edge_votes:
-                    edge_votes[edge_rev] = {}
-                edge_votes[edge_rev]["FGES"] = {
-                    "directed": False,
-                    "probability": row.get("probability", 1.0),
-                    "coefficient": None,
-                }
-
     # --- GRaSP ---
     if "grasp_result" in session_state:
         res = session_state["grasp_result"]

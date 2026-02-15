@@ -13,7 +13,7 @@ st.set_page_config(
 
 st.title("因果分析比較ダッシュボード")
 st.markdown(
-    "LiNGAM / PC / FCI / GES / GRaSP の結果を統合的に比較し、介入優先度を算出するツール"
+    "LiNGAM / PC / FCI / GRaSP の結果を統合的に比較し、介入優先度を算出するツール"
 )
 
 # --- サイドバー: データ設定 ---
@@ -207,12 +207,6 @@ digraph analysis_flow {
         color="#4527A0"
     ]
 
-    step2_fges [
-        label="FGES\\n\\nスコアベース最適化 (BIC) + Bootstrap\\nCPDAG の推定\\n(GES の高速版)"
-        fillcolor="#E0F2F1"
-        color="#00695C"
-    ]
-
     step2_grasp [
         label="GRaSP\\n\\n順列ベース (BIC) + Bootstrap\\nCPDAG の推定"
         fillcolor="#E0F7FA"
@@ -252,12 +246,10 @@ digraph analysis_flow {
 
     step1 -> step2_lingam [label="ICA ベース"]
     step1 -> step2_pc [label="制約ベース"]
-    step1 -> step2_fges [label="スコアベース"]
     step1 -> step2_grasp [label="順列ベース"]
 
     step2_lingam -> consensus
     step2_pc -> consensus
-    step2_fges -> consensus
     step2_grasp -> consensus
 
     consensus -> step3
@@ -265,12 +257,12 @@ digraph analysis_flow {
     step4 -> conclusion
 
     // ---- Layout hints ----
-    { rank=same; step2_lingam; step2_pc; step2_fges; step2_grasp }
+    { rank=same; step2_lingam; step2_pc; step2_grasp }
 }
 """, use_container_width=True)
 
 st.caption(
-    "5つの因果探索手法 (LiNGAM / PC / FCI / FGES / GRaSP) のアンサンブル結果から統合因果グラフを構築し、"
+    "4つの因果探索手法 (LiNGAM / PC / FCI / GRaSP) のアンサンブル結果から統合因果グラフを構築し、"
     "DoWhy による因果効果推定 (Backdoor Adjustment) を実行することで、"
     "因果関係の信頼度を高め、介入効果の大きい変数を特定します。"
 )
